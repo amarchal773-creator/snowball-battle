@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Snowball Battle - Noël Pro</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Mountains+of+Christmas:wght@400;700&family=Quicksand:wght@500&display=swap');
+        
+        body { margin: 0; overflow: hidden; font-family: 'Quicksand', sans-serif; background-color: #000; }
+        
+        /* Effet de givre sur les bords */
+        #frost { 
+            position: absolute; width: 100%; height: 100%; pointer-events: none; 
+            box-shadow: inset 0 0 0px rgba(255,255,255,0); 
+            z-index: 4; transition: box-shadow 2s; 
+        }
+
+        /* Menu de Noël */
+        #overlay { 
+            position: absolute; width: 100%; height: 100%; display: flex; 
+            align-items: center; justify-content: center; 
+            background: radial-gradient(circle, rgba(20, 40, 80, 0.5) 0%, rgba(5, 10, 20, 0.8) 100%); 
+            backdrop-filter: blur(10px); z-index: 10; 
+        }
+
+        .menu-card { 
+            background: rgba(255, 255, 255, 0.1); padding: 50px; border-radius: 30px; 
+            border: 2px solid rgba(255, 255, 255, 0.3); text-align: center; color: white; 
+            box-shadow: 0 0 50px rgba(0, 150, 255, 0.2);
+        }
+
+        h1 { font-family: 'Mountains of Christmas', cursive; font-size: 60px; text-shadow: 0 0 20px #3498db; margin: 0 0 20px 0; }
+
+        button { 
+            background: linear-gradient(45deg, #c21807 25%, #ffffff 25%, #c21807 50%, #ffffff 75%); 
+            background-size: 40px 40px; border: 4px solid #fff; padding: 15px 50px; 
+            font-size: 28px; font-family: 'Mountains of Christmas', cursive; color: #fff; 
+            border-radius: 15px; cursor: pointer; box-shadow: 0 8px 0px #801005; transition: 0.2s;
+        }
+        button:hover { transform: scale(1.05); filter: brightness(1.1); }
+        button:active { transform: translateY(4px); box-shadow: 0 2px 0px #801005; }
+
+        /* HUD */
+        #hud { position: absolute; top: 20px; left: 20px; color: white; z-index: 5; display: none; }
+        .hud-box { background: rgba(0, 0, 0, 0.4); padding: 15px; border-radius: 15px; border-left: 5px solid #f1c40f; backdrop-filter: blur(5px); }
+        #timer-box { position: absolute; top: 20px; right: 20px; font-size: 45px; font-family: 'Mountains of Christmas'; color: #e74c3c; z-index: 5; display: none; text-shadow: 0 0 10px #000; }
+        
+        .ammo-bar { width: 150px; height: 12px; background: rgba(255,255,255,0.2); border-radius: 6px; overflow: hidden; margin-top: 5px; border: 1px solid #fff; }
+        #ammo-fill { height: 100%; background: linear-gradient(90deg, #3498db, #8ed1fc); width: 33%; transition: width 0.3s; }
+        
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 16px; height: 16px; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); display: none; pointer-events: none; mix-blend-mode: difference; }
+    </style>
+</head>
+<body>
+
+    <div id="frost"></div>
+    <div id="overlay">
+        <div class="menu-card">
+            <h1 id="menu-title">❄️ Snowball Battle ❄️</h1>
+            <div id="score-display" style="font-size: 24px; color: #f1c40f; margin-bottom: 20px; display: none;"></div>
+            <button id="btn-play">JOUER</button>
+            <p style="color: #add8e6; margin-top: 20px; font-weight: bold;">Z,Q,S,D : Bouger | E : Ramasser | Clic : Lancer</p>
+        </div>
+    </div>
+
+    <div id="hud">
+        <div class="hud-box">
+            <div style="font-family: 'Mountains of Christmas'; font-size: 32px; color: #f1c40f;">Score: <span id="current-score">0</span></div>
+            <div class="ammo-bar"><div id="ammo-fill"></div></div>
+            <small><span id="ammo-text">5</span> / 15 boules</small>
+        </div>
+    </div>
+    <div id="timer-box">60s</div>
+    <div id="crosshair"></div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "controls": "https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'controls';
+
+        // --- INITIALISATION ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xadd8e6);
+        scene.fog = new THREE.Fog(0xadd8e6, 10, 70);
+        
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+        sun.position.set(10, 20, 10);
+        scene.add(sun, new THREE.AmbientLight(0xddeeff, 0.8));
+
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // --- JOUEUR ET BRAS ---
+        const armGroup = new THREE.Group();
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.8), new THREE.MeshLambertMaterial({ color: 0xc21807 }));
+        arm.position.set(0.4, -0.4, -0.5);
+        armGroup.add(arm); camera.add(armGroup); scene.add(camera);
+
+        // --- VARIABLES DE JEU ---
+        let score = 0, ammo = 5, timeLeft = 60, gameActive = false, isGathering = false;
+        const snowballs = [], snowBlocks = [], targets = [];
+
+        const controls = new PointerLockControls(camera, document.body);
+        document.getElementById('btn-play').addEventListener('click', () => {
+            if(timeLeft <= 0) { score = 0; ammo = 5; timeLeft = 60; updateHUD(); }
+            controls.lock();
+        });
+
+        controls.addEventListener('lock', () => {
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('timer-box').style.display = 'block';
+            document.getElementById('crosshair').style.display = 'block';
+            gameActive = true;
+        });
+
+        controls.addEventListener('unlock', () => {
+            gameActive = false;
+            document.getElementById('overlay').style.display = 'flex';
+            document.getElementById('menu-title').innerText = timeLeft <= 0 ? "FIN DE PARTIE" : "PAUSE";
+            document.getElementById('score-display').innerText = "Score final : " + score;
+            document.getElementById('score-display').style.display = 'block';
+        });
+
+        // --- OBJETS ---
+        function createSnowman(type = "normal") {
+            const group = new THREE.Group();
+            const color = type === "gold" ? 0xf1c40f : 0xffffff;
+            const mat = new THREE.MeshLambertMaterial({color: color});
+            const b1 = new THREE.Mesh(new THREE.SphereGeometry(0.8, 12, 12), mat);
+            const b2 = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 12), mat); b2.position.y = 1.1;
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12), mat); head.position.y = 1.8;
+            group.add(b1, b2, head);
+            group.userData = { type: type };
+            group.position.set(Math.random()*80-40, 0.8, Math.random()*80-40);
+            scene.add(group); targets.push(group);
+        }
+
+        function createBlock() {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x3498db, emissiveIntensity: 0.3 }));
+            b.position.set(Math.random()*80-40, 0.6, Math.random()*80-40);
+            scene.add(b); snowBlocks.push(b);
+        }
+
+        for(let i=0; i<12; i++) createSnowman(Math.random() > 0.85 ? "gold" : "normal");
+        for(let i=0; i<8; i++) createBlock();
+
+        // --- ACTIONS ---
+        function harvest() {
+            if (!gameActive || isGathering || ammo >= 15) return;
+            const ray = new THREE.Raycaster();
+            ray.setFromCamera(new THREE.Vector2(0,0), camera);
+            const hits = ray.intersectObjects(snowBlocks);
+            
+            if (hits.length > 0 && hits[0].distance < 4) {
+                isGathering = true;
+                const block = hits[0].object;
+                const startTime = performance.now();
+                const duration = 800; 
+
+                function anim(t) {
+                    const progress = Math.min((t - startTime) / duration, 1);
+                    const curve = Math.sin(progress * Math.PI);
+
+                    // Le bras descend
+                    armGroup.rotation.x = curve * -1.5;
+                    // LA CAMERA DESCEND (Le corps se baisse)
+                    camera.position.y = 1.7 - (curve * 0.8);
+
+                    if (progress < 1) {
+                        requestAnimationFrame(anim);
+                    } else {
+                        camera.position.y = 1.7;
+                        armGroup.rotation.x = 0;
+                        isGathering = false;
+                        ammo = Math.min(15, ammo + 3);
+                        timeLeft += 5;
+                        scene.remove(block);
+                        snowBlocks.splice(snowBlocks.indexOf(block), 1);
+                        updateHUD();
+                        setTimeout(createBlock, 4000);
+                    }
+                }
+                requestAnimationFrame(anim);
+            }
+        }
+
+        window.addEventListener('mousedown', () => {
+            if (!gameActive || ammo <= 0 || isGathering) return;
+            ammo--; updateHUD();
+            const ball = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), new THREE.MeshStandardMaterial({color: 0xffffff}));
+            ball.position.copy(camera.position);
+            const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+            ball.userData.vel = dir.multiplyScalar(1.3);
+            scene.add(ball); snowballs.push(ball);
+        });
+
+        function updateHUD() {
+            document.getElementById('ammo-text').innerText = ammo;
+            document.getElementById('ammo-fill').style.width = (ammo/15)*100 + "%";
+            document.getElementById('current-score').innerText = score;
+            document.getElementById('timer-box').innerText = Math.ceil(timeLeft) + "s";
+        }
+
+        // --- BOUCLE PRINCIPALE ---
+        let keys = { w: false, s: false, a: false, d: false };
+        window.addEventListener('keydown', (e) => { 
+            if(e.code==='KeyW') keys.w=true; if(e.code==='KeyS') keys.s=true;
+            if(e.code==='KeyA') keys.a=true; if(e.code==='KeyD') keys.d=true;
+            if(e.code==='KeyE') harvest();
+        });
+        window.addEventListener('keyup', (e) => { if(e.code==='KeyW') keys.w=false; if(e.code==='KeyS') keys.s=false; if(e.code==='KeyA') keys.a=false; if(e.code==='KeyD') keys.d=false; });
+
+        let lastTime = performance.now();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now();
+            const delta = (time - lastTime) / 1000;
+            
+            if (gameActive) {
+                timeLeft -= delta;
+                if(timeLeft <= 0) { timeLeft = 0; controls.unlock(); }
+
+                const spd = 40 * delta;
+                if(!isGathering) {
+                    if(keys.w) controls.moveForward(spd); if(keys.s) controls.moveForward(-spd);
+                    if(keys.a) controls.moveRight(-spd); if(keys.d) controls.moveRight(spd);
+                }
+
+                for(let i = snowballs.length - 1; i >= 0; i--) {
+                    const b = snowballs[i];
+                    b.position.add(b.userData.vel);
+                    b.userData.vel.y -= 0.02; // Gravité
+                    
+                    if(b.position.y < 0) {
+                        scene.remove(b); snowballs.splice(i, 1); continue;
+                    }
+
+                    targets.forEach((t, idx) => {
+                        if(b.position.distanceTo(t.position) < 1.4) {
+                            score += (t.userData.type === "gold" ? 500 : 100);
+                            scene.remove(t); targets.splice(idx, 1);
+                            scene.remove(b); snowballs.splice(i, 1);
+                            updateHUD();
+                            setTimeout(() => createSnowman(Math.random() > 0.8 ? "gold" : "normal"), 3000);
+                        }
+                    });
+                }
+            }
+            renderer.render(scene, camera);
+            lastTime = time;
+        }
+        
+        camera.position.set(0, 1.7, 5);
+        animate();
+        updateHUD();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
